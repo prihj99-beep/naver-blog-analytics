@@ -57,7 +57,10 @@
         <p id="weekly-status" role="status" aria-live="polite">저장 전 추출 결과를 확인하세요.</p>
         <div id="weekly-errors" class="error" role="alert"></div><div id="weekly-warnings" class="warning"></div>
         <div class="table-wrap"><table><thead><tr><th>시작일</th><th>종료일</th><th>채널 조회수</th><th>검색 유입률(%)</th><th>채널</th></tr></thead><tbody id="weekly-preview-meta"></tbody></table></div>
-        <div class="table-wrap"><table><thead><tr><th>검색어 원문</th><th>유입 비율(%)</th><th>상세 통계 URL · 방문하지 않음</th></tr></thead><tbody id="weekly-preview-body"></tbody></table></div>
+        <p class="hint">붙여넣은 HTML 링크와 일반 텍스트의 검색어·비율이 명확히 일치하면 Markdown으로 변환합니다. HTML 처리는 가상 예제로 검증했으며, 불명확한 구조는 변환하지 않습니다.</p>
+        <p id="weekly-clipboard-status" class="hint" role="status"></p>
+        <div class="table-wrap"><table><thead><tr><th>검색어 원문</th><th>유입 비율(%)</th><th>상세 통계 URL</th></tr></thead><tbody id="weekly-preview-body"></tbody></table></div>
+        <p class="hint">상세 링크는 직접 클릭할 때만 새 탭으로 열립니다. URL 미확인은 입력에서 링크를 확보하지 못했다는 뜻입니다.</p>
         <div id="weekly-diff"></div>
         <label>복사한 목록 범위<select id="weekly-coverage"><option value="unknown">미확인 · 기본값</option><option value="full">전체 목록 · 사용자 확인</option><option value="partial">일부 복사</option></select></label><p class="hint">전체 선택은 사용자 확인이며 프로그램의 완전성 검증이 아닙니다. 더보기가 남으면 일부 자료로 취급합니다. 붙여넣기 후 미리보기가 자동 표시되며, 저장 버튼은 표시 내용을 확인했다는 뜻입니다.</p>
         <button id="weekly-save" type="button" disabled>확인한 주간 자료 저장</button>

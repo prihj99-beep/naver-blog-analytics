@@ -159,6 +159,9 @@ def parse_text(raw):
                 break
             link = LINK.fullmatch(content)
             adjacent = list(LINK.finditer(content))
+            # A keyword link may have its percentage outside the link.
+            first = adjacent[0] if len(adjacent) == 1 and adjacent[0].start() == 0 else None
+            trailing_ratio = content[first.end():].strip() if first else ''
             if re.fullmatch(r'더\s*보기\s*[+＋]?', link.group(1) if link else content):
                 i += 1
                 continue
@@ -170,6 +173,11 @@ def parse_text(raw):
                 else:
                     add(word+' '+ratio,first_url)
                 row_started = True
+            elif first and re.fullmatch(r'\d+(?:\.\d+)?\s*%', trailing_ratio):
+                add(markdown_label(first.group(1))+' '+trailing_ratio, first.group(2)); row_started = True
+            elif link and i+1 < len(section) and re.fullmatch(r'\d+(?:\.\d+)?\s*%', section[i+1]) and not RATIO.fullmatch(markdown_label(link.group(1))):
+                add(markdown_label(link.group(1))+' '+section[i+1], link.group(2)); row_started = True
+                i += 1
             elif link and ('%' in link.group(1) or '/new-windows/query-stats' in link.group(2)):
                 add(link.group(1), link.group(2)); row_started = True
             elif '%' in content and not link and not content.startswith('검색 유입률'):
@@ -202,6 +210,9 @@ def parse_text(raw):
     warnings.append('복사 목록의 전체성을 프로그램이 검증하지는 않습니다. 목록에서 빠진 검색어를 유입 0으로 해석하지 않습니다.')
     if has_more:
         warnings.append('더보기 표시가 남아 있습니다. 목록이 불완전할 가능성이 있어 분석에서 일부 자료로 취급합니다.')
+    missing_urls = sum(not row['detail_url'] for row in rows.values())
+    if missing_urls:
+        warnings.append(f'상세 URL 미확인 {missing_urls}개 — 해당 검색어의 상세 링크가 입력에서 확인되지 않았습니다.')
     return {'start': start, 'end': end, **metadata, 'channel': next(iter(channels)) if len(channels)==1 else None,
             'rows': list(rows.values()), 'errors': list(dict.fromkeys(errors)), 'warnings': list(dict.fromkeys(warnings)),
             'source_hash': digest(raw), 'source': SOURCE, 'has_more': has_more}

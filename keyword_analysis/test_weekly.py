@@ -33,6 +33,26 @@ PLAIN = '''2026. 09. 28. ~ 2026. 10. 04.
 
 
 class ParseWeeklyTests(unittest.TestCase):
+    def test_link_keyword_with_external_same_line_or_next_line_ratio(self):
+        for separator in (' ', '\n'):
+            text = re.sub(r'\[([^\]\n]+?)(\d+(?:\.\d+)?%)\]\(([^)]+)\)',
+                          lambda m: '['+m[1].strip()+']('+m[3]+')'+separator+m[2], SAMPLE)
+            report = parse_text(text)
+            self.assertEqual(report['errors'], [])
+            self.assertEqual(report['rows'], parse_text(SAMPLE)['rows'])
+
+    def test_external_ratio_still_validates_url_before_save(self):
+        line = next(line for line in SAMPLE.splitlines() if line.startswith('- [경매 보증금'))
+        changed = line.replace('14.29%]', ']')+' 14.29%'
+        for before, after in [('interval=week', 'interval=date'), ('query=%EA%B2%BD', 'query=wrong%EA%B2%BD'),
+                              ('creator-advisor.naver.com', 'evil.example')]:
+            for separator in (' ', '\n'):
+                report = parse_text(SAMPLE.replace(line, changed.replace(' 14.29%', separator+'14.29%').replace(before, after)))
+                self.assertTrue(report['errors'])
+
+    def test_missing_detail_urls_have_explicit_warning(self):
+        self.assertTrue(any('상세 URL 미확인 4개' in w for w in parse_text(PLAIN)['warnings']))
+
     def test_real_sample_exact_keywords_metrics_dates_and_urls(self):
         report = parse_text(SAMPLE)
         self.assertEqual(report['errors'], [])
@@ -109,6 +129,18 @@ class WeeklyStoreTests(unittest.TestCase):
         with closing(sqlite3.connect(self.path)) as db:
             self.assertEqual(db.execute('SELECT raw_text FROM weekly_sources').fetchone()[0], SAMPLE)
             self.assertEqual(db.execute('SELECT COUNT(*) FROM weekly_keywords').fetchone()[0], 4)
+
+    def test_external_ratio_invalid_url_cannot_replace_saved_report(self):
+        self.store.save(SAMPLE, None, True)
+        before = self.path.read_bytes()
+        for separator in (' ', '\n'):
+            text = re.sub(r'\[([^\]\n]+?)(\d+(?:\.\d+)?%)\]\(([^)]+)\)',
+                          lambda m: '['+m[1].strip()+']('+m[3]+')'+separator+m[2], SAMPLE)
+            for invalid in (text.replace('interval=week', 'interval=date'),
+                            text.replace('creator-advisor.naver.com/new-windows', 'evil.example/new-windows')):
+                with self.assertRaises(ValueError):
+                    self.store.save(invalid, 1, True)
+                self.assertEqual(self.path.read_bytes(), before)
 
     def test_same_paste_no_duplicate_new_revision_only_on_replacement(self):
         self.store.save(SAMPLE, None, True)

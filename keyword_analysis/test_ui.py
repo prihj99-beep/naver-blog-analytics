@@ -14,6 +14,25 @@ from keyword_analysis.trends import TrendError
 ROOT=Path(__file__).resolve().parents[1]
 
 
+def synthetic_clipboard():
+    """Invented HTML, not captured from the live Naver clipboard."""
+    from html import escape
+    from urllib.parse import urlencode
+    from keyword_analysis.test_weekly import PLAIN
+    from keyword_analysis.weekly import parse_text
+    report = parse_text(PLAIN)
+    links = []
+    urls = []
+    for row in report['rows']:
+        url = 'https://creator-advisor.naver.com/new-windows/query-stats?'+urlencode(dict(
+            channelId='synthetic', startDate=report['start'], endDate=report['end'], interval='week',
+            service='naver_blog', metric='cv', query=row['raw_text']))
+        urls.append(url)
+        links.append(f'<div><a href="{escape(url)}"><b>{escape(row["raw_text"])}</b></a>'
+                     f'<a href="{escape(url)}"><span>{row["ratio"]}%</span></a></div>')
+    return PLAIN, ''.join(links), urls
+
+
 class MockClient:
     def __init__(self):
         self.calls=[]
@@ -83,6 +102,137 @@ class AnalysisUITests(unittest.TestCase):
         self.page.locator('#trend-end').fill('2026-10-18')
         self.server.last_request=0  # Test control only; production always enforces cooldown.
         self.page.get_by_role('button',name='검색 트렌드 조회',exact=True).click()
+
+    def paste_weekly(self, plain, html=''):
+        # Synthetic paste event. Emulate the native text default only if uncancelled.
+        return self.page.evaluate('''({plain,html}) => {
+          const input = document.querySelector('#weekly-text'); input.focus(); input.select();
+          const data = new DataTransfer(); data.setData('text/plain', plain);
+          if (html) data.setData('text/html', html);
+          const event = new ClipboardEvent('paste', {clipboardData:data,bubbles:true,cancelable:true});
+          const nativeDefault = input.dispatchEvent(event);
+          if (nativeDefault) {
+            input.setRangeText(plain,input.selectionStart,input.selectionEnd,'end');
+            input.dispatchEvent(new Event('input',{bubbles:true}));
+          }
+          return nativeDefault;
+        }''', dict(plain=plain,html=html))
+
+    def test_synthetic_html_paste_urls_save_reload_duplicate_and_click(self):
+        from playwright.sync_api import expect
+        from keyword_analysis.weekly import parse_text
+        plain, html, urls = synthetic_clipboard()
+        self.page.get_by_role('tab',name='주간 통계',exact=True).click()
+        requests=[]
+        self.page.on('request',lambda request: requests.append(request.url))
+        self.assertFalse(self.paste_weekly(plain, html))
+        expect(self.page.locator('#weekly-clipboard-status')).to_contain_text('상세 URL 4개')
+        expect(self.page.locator('#weekly-preview-body a')).to_have_count(4)
+        for i,url in enumerate(urls):
+            expect(self.page.locator('#weekly-preview-body a').nth(i)).to_have_attribute('href',url)
+        self.assertTrue(all(url.startswith(self.server.origin+'/') for url in requests))
+        self.assertFalse(self.server.weekly.path.exists())
+        self.page.locator('#weekly-save').click()
+        expect(self.page.locator('#weekly-status')).to_contain_text('v1 저장 완료')
+        expected=parse_text(self.page.locator('#weekly-text').input_value())['rows']
+        self.assertEqual(self.server.weekly.list()[0]['rows'],expected)
+        self.page.reload(); self.page.get_by_role('tab',name='주간 통계',exact=True).click()
+        self.paste_weekly(plain,html)
+        expect(self.page.locator('#weekly-diff')).to_contain_text('같은 원문')
+        self.page.locator('#weekly-save').click()
+        expect(self.page.locator('#weekly-status')).to_contain_text('중복 저장하지 않았습니다')
+        self.assertEqual(self.server.weekly.list()[0]['revision'],1)
+        self.paste_weekly(plain,html)
+        link=self.page.locator('#weekly-preview-body a').first
+        expect(link).to_have_attribute('rel','noopener noreferrer')
+        expect(link).to_have_attribute('target','_blank')
+        # Intercept the user-triggered navigation; never contact Naver.
+        opened=[]
+        def detail_route(route):
+            opened.append(route.request.url)
+            route.fulfill(status=200,content_type='text/html',body='offline detail stub')
+        self.context.route('https://creator-advisor.naver.com/**',detail_route)
+        with self.page.expect_popup() as popup:
+            link.click()
+        popup.value.wait_for_load_state()
+        self.assertEqual(opened,[urls[0]])
+        popup.value.close()
+        self.assertEqual(self.client.calls,[])
+
+    def test_synthetic_html_combined_anchor_and_plain_two_line_rows(self):
+        from playwright.sync_api import expect
+        from html import escape
+        from keyword_analysis.weekly import parse_text
+        plain, _, urls = synthetic_clipboard()
+        report=parse_text(plain)
+        html=''.join(f'<a href="{escape(url)}">{escape(row["raw_text"])}{row["ratio"]}%</a>'
+                     for row,url in zip(report['rows'],urls))
+        for row in report['rows']:
+            plain=plain.replace(row['raw_text']+' '+row['ratio']+'%',row['raw_text']+'\n'+row['ratio']+'%')
+        self.page.get_by_role('tab',name='주간 통계',exact=True).click()
+        self.paste_weekly(plain,html)
+        expect(self.page.locator('#weekly-preview-body a')).to_have_count(4)
+        self.assertFalse(self.server.weekly.path.exists())
+
+    def test_plain_and_html_without_detail_links_keep_plain_missing_url_warning(self):
+        from playwright.sync_api import expect
+        plain, _, _ = synthetic_clipboard()
+        self.page.get_by_role('tab',name='주간 통계',exact=True).click()
+        for html in ('','<div>ordinary text</div>'):
+            self.assertTrue(self.paste_weekly(plain,html))
+            self.assertEqual(self.page.locator('#weekly-text').input_value(),plain)
+            expect(self.page.locator('#weekly-preview-body tr')).to_have_count(4)
+            expect(self.page.locator('#weekly-preview-body a')).to_have_count(0)
+            expect(self.page.locator('#weekly-warnings')).to_contain_text('상세 URL 미확인 4개')
+            expect(self.page.locator('#weekly-preview-body')).to_contain_text('입력에서 상세 링크를 확인하지 못함')
+
+    def test_ambiguous_html_is_not_applied_or_partially_converted(self):
+        from playwright.sync_api import expect
+        plain, html, urls = synthetic_clipboard()
+        self.page.get_by_role('tab',name='주간 통계',exact=True).click()
+        self.page.locator('#weekly-text').fill('keep existing input')
+        cases=[html.replace('14.29%','15%',1), html.replace('경매 보증금 수표 준비','다른 검색어',1),
+               html.replace('interval=week','interval=date',1),
+               html.replace('query=', 'query=wrong',1),
+               html+html.replace('interval=week','interval=date'),
+               '<a href="'+urls[0]+'">경매 보증금 수표 준비</a>']
+        for value in cases:
+            self.assertFalse(self.paste_weekly(plain,value))
+            self.assertEqual(self.page.locator('#weekly-text').input_value(),'keep existing input')
+            expect(self.page.locator('#weekly-clipboard-status')).to_contain_text('붙여넣기를 적용하지 않았습니다')
+        self.assertFalse(self.server.weekly.path.exists())
+
+    def test_html_invalid_urls_are_rejected_by_server_and_inert_html_never_loads(self):
+        from playwright.sync_api import expect
+        plain, html, _ = synthetic_clipboard()
+        self.page.get_by_role('tab',name='주간 통계',exact=True).click()
+        for before,after in [('creator-advisor.naver.com','evil.example'),('interval=week','interval=date'),
+                             ('startDate=2026-09-28','startDate=2026-09-27')]:
+            self.paste_weekly(plain,html.replace(before,after))
+            expect(self.page.locator('#weekly-errors')).not_to_be_empty()
+            expect(self.page.locator('#weekly-save')).to_be_disabled()
+        self.paste_weekly(plain,html+'<img src="https://evil.example/track"><script>window.clipboardExecuted=true</script>')
+        expect(self.page.locator('#weekly-preview-body a')).to_have_count(4)
+        self.assertIsNone(self.page.evaluate('window.clipboardExecuted'))
+        self.assertFalse(self.server.weekly.path.exists())
+        self.assertEqual(self.external,[])
+
+    def test_existing_markdown_paste_and_external_ratio_links(self):
+        from playwright.sync_api import expect
+        from keyword_analysis.test_server_version import REAL_SAMPLES
+        import re
+        self.page.get_by_role('tab',name='주간 통계',exact=True).click()
+        for _,_,_,_,count,text in REAL_SAMPLES:
+            self.assertTrue(self.paste_weekly(text,'<div>unused HTML</div>'))
+            expect(self.page.locator('#weekly-preview-body a')).to_have_count(count)
+            expect(self.page.locator('#weekly-errors')).to_be_empty()
+        text=REAL_SAMPLES[0][-1]
+        for separator in (' ','\n'):
+            changed=re.sub(r'\[([^\]\n]+?)(\d+(?:\.\d+)?%)\]\(([^)]+)\)',
+                           lambda m:'['+m[1].strip()+']('+m[3]+')'+separator+m[2],text)
+            self.paste_weekly(changed)
+            expect(self.page.locator('#weekly-preview-body a')).to_have_count(4)
+            expect(self.page.locator('#weekly-errors')).to_be_empty()
 
     def test_saved_three_weeks_plain_briefing_read_only_copy_and_details(self):
         import sqlite3

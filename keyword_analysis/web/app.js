@@ -373,6 +373,93 @@ function weeklyRow(host, values) {
   for (const value of values) row.append(node('td', value === null || value === undefined ? '미확인' : String(value)));
   host.append(row);
 }
+function weeklyKeywordRow(host, record) {
+  const row = node('tr');
+  row.append(node('td', record.raw_text), node('td', record.ratio));
+  const cell = node('td', '미확인 · 입력에서 상세 링크를 확인하지 못함');
+  if (record.detail_url) {
+    // Only server-validated HTTPS detail URLs become clickable.
+    const url = new URL(record.detail_url);
+    if (url.protocol === 'https:' && url.host === 'creator-advisor.naver.com' && url.pathname === '/new-windows/query-stats' && !url.hash && !url.username && !url.password) {
+      const link = node('a', record.detail_url);
+      link.href = record.detail_url; link.target = '_blank'; link.rel = 'noopener noreferrer';
+      cell.replaceChildren(link);
+    }
+  }
+  row.append(cell); host.append(row);
+}
+
+function weeklyClipboardText(plain, html) {
+  if (!html || /\[[^\]\n]+\]\(https?:\/\//.test(plain)) return {text: plain, count: 0};
+  if (html.length > 2000000) throw new Error('HTML이 너무 큽니다. 검색어 목록만 다시 복사하세요.');
+  // Template contents stay inert: never attach copied HTML to the live document.
+  const template = document.createElement('template'); template.innerHTML = html;
+  const groups = new Map();
+  for (const anchor of template.content.querySelectorAll('a[href]')) {
+    const href = anchor.getAttribute('href');
+    if (!href.includes('/new-windows/query-stats')) continue;
+    if (/[\s()]/.test(href)) throw new Error('상세 URL 형식을 확인할 수 없습니다.');
+    let url;
+    try { url = new URL(href); } catch { throw new Error('상세 URL 형식을 확인할 수 없습니다.'); }
+    const words = url.searchParams.getAll('query');
+    if (words.length !== 1 || !words[0] || /[\[\]\r\n]/.test(words[0])) throw new Error('상세 URL의 검색어를 확인할 수 없습니다.');
+    const word = words[0], label = anchor.textContent.trim();
+    const old = groups.get(word);
+    if (old && old.href !== href) throw new Error('같은 검색어에 서로 다른 상세 URL이 있습니다.');
+    const group = old || {href, word, keyword: false, ratios: []};
+    const combined = label.match(/^(.*?)\s*(\d+(?:\.\d+)?)\s*%$/);
+    if (label === word) group.keyword = true;
+    else if (combined && (!combined[1].trim() || combined[1].trim() === word)) {
+      if (combined[1].trim() === word) group.keyword = true;
+      group.ratios.push(combined[2]);
+    } else throw new Error('HTML 링크의 검색어·비율이 URL과 일치하지 않습니다.');
+    groups.set(word, group);
+  }
+  if (!groups.size) return {text: plain, count: 0};
+  const lines = plain.split(/\r?\n/), begin = lines.findIndex(line => line.trim() === '유입검색어 분석');
+  if (begin < 0) throw new Error('일반 텍스트의 유입검색어 분석 영역을 확인할 수 없습니다.');
+  const used = new Set(); let started = false;
+  for (let i = begin+1; i < lines.length; i++) {
+    const line = lines[i].trim();
+    if (started && ['게시글','동영상','클립'].includes(line)) break;
+    const same = line.match(/^(.*?)\s*(\d+(?:\.\d+)?)\s*%$/);
+    const next = (lines[i+1] || '').trim().match(/^(\d+(?:\.\d+)?)\s*%$/);
+    const word = same ? same[1].trim() : line;
+    const ratio = same ? same[2] : next?.[1];
+    const group = groups.get(word);
+    if (!group || ratio === undefined) continue;
+    if (!group.keyword || !group.ratios.length || group.ratios.some(value => Number(value) !== Number(ratio))) {
+      throw new Error('HTML과 일반 텍스트의 검색어·비율을 명확히 대응할 수 없습니다.');
+    }
+    lines[i] = `[${word} ${ratio}%](${group.href})`;
+    if (!same) lines[++i] = '';
+    used.add(word); started = true;
+  }
+  if (used.size !== groups.size) throw new Error('일반 텍스트와 대응하지 않는 HTML 상세 링크가 있습니다.');
+  return {text: lines.join('\n'), count: used.size};
+}
+
+$('#weekly-text').addEventListener('paste', event => {
+  const clipboard = event.clipboardData;
+  if (!clipboard) return;
+  const plain = clipboard.getData('text/plain'), html = clipboard.getData('text/html');
+  const status = $('#weekly-clipboard-status');
+  try {
+    const result = weeklyClipboardText(plain, html);
+    if (result.count) {
+      event.preventDefault();
+      const input = event.currentTarget;
+      input.setRangeText(result.text, input.selectionStart, input.selectionEnd, 'end');
+      input.dispatchEvent(new Event('input', {bubbles: true}));
+    }
+    // No clipboard contents are logged or transmitted to any external service.
+    status.textContent = `클립보드: 일반 텍스트 ${plain ? '있음' : '없음'} · HTML ${html ? '있음' : '없음'} · ` +
+      (result.count ? `상세 URL ${result.count}개를 Markdown으로 변환했습니다. 미리보기를 확인하세요.` : '일반 텍스트를 유지합니다. URL 추출 여부는 미리보기에서 확인하세요.');
+  } catch (error) {
+    event.preventDefault();
+    status.textContent = `붙여넣기를 적용하지 않았습니다. ${error.message} HTML 구조를 확인하거나 일반 텍스트로 붙여넣으세요.`;
+  }
+});
 function renderWeeklyComparison() {
   const body = $('#weekly-compare-body'); body.replaceChildren();
   for (const row of weeklyData.comparisons.filter(row => row.start === $('#weekly-period').value)) {
@@ -464,7 +551,7 @@ $('#weekly-form').onsubmit = async event => {
     weeklyPreview = {...preview, text, coverage};
     const report = preview.report;
     weeklyRow($('#weekly-preview-meta'), [report.start, report.end, report.channel_views, report.search_rate, report.channel]);
-    for (const row of report.rows) weeklyRow($('#weekly-preview-body'), [row.raw_text, row.ratio, row.detail_url]);
+    for (const row of report.rows) weeklyKeywordRow($('#weekly-preview-body'), row);
     for (const message of report.errors) $('#weekly-errors').append(node('p', message));
     for (const message of report.warnings) $('#weekly-warnings').append(node('p', message));
     $('#weekly-status').textContent = `${report.rows.length}개 검색어 추출 · ${report.errors.length ? '오류를 확인하세요. 저장할 수 없습니다.' : '내용을 확인하고 저장하세요.'}`;
