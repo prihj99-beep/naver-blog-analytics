@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="dashboard-token" content="__DASHBOARD_TOKEN__">
+  <title>블로그 통계</title><link rel="stylesheet" href="/style.css"><script src="/app.js" defer></script>
+</head>
+<body>
+  <header class="topbar"><a class="brand" href="/"><span class="brand-icon">▥</span> 블로그 통계 <span class="local-badge">LOCAL</span></a><div class="top-actions"><span id="connection" class="connection">● 내 컴퓨터에서 실행 중</span><button id="shutdown" class="quiet">프로그램 종료</button></div></header>
+  <main>
+    <div class="page-heading"><div><p class="eyebrow">MY BLOG INSIGHTS</p><h1>검색으로 만나는 내 블로그</h1><p class="muted">날짜별 검색어와 유입경로를 한곳에서 확인하세요.</p></div><span class="blog-pill" id="blog-id">내 블로그</span></div>
+    <div id="error" class="error" role="alert" hidden></div>
+    <div class="layout">
+      <aside>
+        <section class="card collect-card"><div class="section-title"><span class="step">01</span><h2>새 통계 가져오기</h2></div><p class="muted small">원하는 기간을 선택하고 네이버에 직접 로그인하세요.</p>
+          <form id="collect-form"><label for="collect-start">수집 시작일</label><input id="collect-start" type="date" required><label for="collect-end">수집 종료일</label><input id="collect-end" type="date" required>
+            <label class="checkbox"><input id="existing-only" type="checkbox"><span>저장된 날짜만 다시 수집</span></label><p class="hint" id="selected-dates">수집할 날짜를 선택하세요.</p><button id="collect-button" class="primary full" type="submit">네이버 통계 수집 <span>↗</span></button>
+          </form>
+          <div class="privacy-note">로그인은 열린 Chromium 창에서 직접 진행합니다. 비밀번호와 쿠키를 별도 저장하지 않습니다.</div>
+        </section>
+        <section class="card job-card"><div class="section-title"><span class="step">02</span><h2>수집 진행 상황</h2></div><span id="phase" class="status-pill">대기</span><p id="job-message" class="small" aria-live="polite">저장된 통계는 로그인 없이 조회할 수 있습니다.</p><progress id="progress" max="1" value="0" aria-label="수집 진행률"></progress><div class="progress-caption"><span id="progress-count">0 / 0일</span><span id="progress-percent">0%</span></div>
+          <button id="login-complete" class="primary full" hidden>로그인 완료 · 상태 확인</button><button id="cancel" class="secondary full" hidden>인증·수집 취소</button><ul id="job-dates" class="job-dates"></ul>
+        </section>
+      </aside>
+      <div class="workspace">
+        <section class="card filter-card"><form id="filter-form"><div><label for="filter-start">조회 시작일</label><input id="filter-start" type="date" required></div><span class="range-dash">—</span><div><label for="filter-end">조회 종료일</label><input id="filter-end" type="date" required></div><div class="query-field"><label for="query">검색어·경로 필터</label><input id="query" type="search" placeholder="찾고 싶은 단어" maxlength="200"></div><button class="secondary" type="submit">조회</button></form></section>
+        <div class="metrics"><section class="metric"><span>수집 완료 날짜</span><strong id="metric-dates">—</strong><small id="metric-dates-note">선택한 기간 기준</small></section><section class="metric"><span>서로 다른 검색어</span><strong id="metric-keywords">—</strong><small>필터 적용 목록 기준</small></section><section class="metric"><span>반복 등장 검색어</span><strong id="metric-repeated">—</strong><small>서로 다른 2일 이상 등장</small></section></div>
+        <section class="card daily-card"><div class="heading-row"><h2>날짜별 수집 현황</h2><span class="small muted">미수집 날짜는 빈 통계와 다릅니다.</span></div><div id="daily" class="daily-grid"></div></section>
+        <section class="card results-card"><div class="heading-row result-heading"><div><p class="eyebrow">SAVED STATISTICS</p><h2>내 검색 통계</h2></div><div class="downloads"><a id="download-csv" class="secondary" download>CSV ↓</a><a id="download-xlsx" class="secondary" download>XLSX ↓</a></div></div>
+          <div class="tabs" role="tablist" aria-label="통계 목록"><button class="tab active" role="tab" aria-selected="true" data-tab="keywords">검색어 <span id="keyword-count">0</span></button><button class="tab" role="tab" aria-selected="false" data-tab="routes">상세 유입경로 <span id="route-count">0</span></button><button class="tab" role="tab" aria-selected="false" data-tab="repeated">반복 등장</button></div>
+          <p id="table-note" class="table-note">비율은 해당 날짜의 검색 유입 내 비율입니다. 실제 유입 횟수를 뜻하지 않습니다.</p>
+          <div class="table-wrap"><table><thead id="table-head"></thead><tbody id="table-body"></tbody></table></div><div id="empty" class="empty" hidden></div>
+          <footer class="table-footer"><span id="row-count">0개 항목</span><span>공식 XLSX 기준 · 검색어와 상세 경로는 독립 목록</span></footer>
+        </section>
+        <p class="footnote">저장된 데이터 조회에는 네이버 로그인이 필요하지 않습니다. 비율로 실제 유입 횟수를 추정하지 않습니다.</p>
+      </div>
+    </div>
+  </main>
+  <dialog id="collect-dialog"><h2>선택한 날짜를 수집할까요?</h2><p id="confirm-description"></p><p class="muted small">로그인을 마치고 ‘로그인 완료’를 눌러야 다운로드를 시작합니다.</p><div class="dialog-actions"><button id="confirm-cancel" class="secondary">취소</button><button id="confirm-start" class="primary">로그인 창 열기</button></div></dialog>
+  <dialog id="shutdown-dialog"><h2>프로그램을 종료할까요?</h2><p>진행 중인 수집을 정리하고 로그인 브라우저와 로컬 서버를 종료합니다. 저장된 데이터는 유지됩니다.</p><div class="dialog-actions"><button id="shutdown-cancel" class="secondary">돌아가기</button><button id="shutdown-confirm" class="primary">프로그램 종료</button></div></dialog>
+</body>
+</html>

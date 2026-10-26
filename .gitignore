@@ -1,0 +1,8 @@
+.venv/
+.setup-tmp/
+__pycache__/
+*.pyc
+data/
+exports/
+downloads/
+verification/
